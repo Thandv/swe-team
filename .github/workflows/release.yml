@@ -2,10 +2,10 @@ name: release
 
 # Builds and publishes the phase-2 installable binary on a tagged push.
 #
-# This workflow is a SCAFFOLD. The binary itself does not exist yet — see
-# binary/README.md for the planned stack decision. Once the stack is picked
-# (Tauri / Electron / PyInstaller), replace the "build" job body with the
-# real build steps and re-enable the publish step.
+# The binary is a Tauri 2 desktop app rooted at `binary/`. Each matrix leg
+# produces an installer for its OS (.dmg/.app on macOS, .msi/.exe on Windows,
+# .deb/.AppImage on Linux). The publish job is gated off until we have a
+# signing setup — artifacts are still uploaded so we can verify the build.
 
 on:
   push:
@@ -14,40 +14,94 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  static-tests:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Verify static tests still pass
-        if: runner.os != 'Windows'
+      - uses: actions/checkout@v4
+      - name: Run static tests
         run: |
           chmod +x scripts/install-agents.sh
           chmod +x tests/run_all.sh tests/check_install.sh tests/e2e/csv2json.sh
           tests/run_all.sh
 
-      - name: Build binary (TODO — placeholder)
+  build:
+    needs: static-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache cargo registry & build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "binary/src-tauri -> target"
+
+      - name: Install Linux build deps
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
-          echo "::warning::Binary build is not yet implemented."
-          echo "Once binary/ has a real stack, fill in this step per platform."
-          echo "Expected output: binary/installers/<platform>/<artifact>"
-          mkdir -p binary/installers/${{ runner.os }}
-          echo "placeholder for ${{ runner.os }}" > binary/installers/${{ runner.os }}/PLACEHOLDER
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev
+
+      - name: Install frontend deps
+        working-directory: binary
+        run: npm ci || npm install
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: binary
+          args: ${{ matrix.args }}
 
       - name: Upload artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: swe-team-${{ runner.os }}
-          path: binary/installers/${{ runner.os }}/
+          name: swe-team-${{ matrix.platform }}-${{ strategy.job-index }}
+          path: |
+            binary/src-tauri/target/release/bundle/**
+            binary/src-tauri/target/*/release/bundle/**
+          if-no-files-found: warn
 
   publish:
     needs: build
     runs-on: ubuntu-latest
-    if: false  # enable when there's a real binary to publish
+    if: false  # enable when there's a signing setup and we want a real release
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4

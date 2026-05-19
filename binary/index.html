@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SWE Team</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 2rem;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        background: #fafafa;
+        color: #1a1a1a;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #1a1a1a;
+          color: #fafafa;
+        }
+        textarea {
+          background: #2a2a2a;
+          color: #fafafa;
+          border-color: #444;
+        }
+        .output {
+          background: #2a2a2a;
+          border-color: #444;
+        }
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.5rem;
+        font-weight: 600;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 8rem;
+        padding: 0.75rem;
+        font-family: inherit;
+        font-size: 1rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        resize: vertical;
+      }
+
+      .row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+      }
+
+      button {
+        padding: 0.6rem 1.1rem;
+        font-size: 0.95rem;
+        font-weight: 500;
+        border: none;
+        border-radius: 6px;
+        background: #2563eb;
+        color: white;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #1d4ed8;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .output {
+        padding: 0.85rem 1rem;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        background: #fff;
+        white-space: pre-wrap;
+        min-height: 2.5rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9rem;
+      }
+
+      .output:empty::before {
+        content: "(no output yet)";
+        color: #888;
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>What do you want to build?</h1>
+    <textarea
+      id="idea"
+      placeholder="Describe the thing you want the team to build..."
+    ></textarea>
+    <div class="row">
+      <button id="submit" type="button">Submit</button>
+    </div>
+    <div id="output" class="output"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

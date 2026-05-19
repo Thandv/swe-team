@@ -1,0 +1,17 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Tauri / Rust
+src-tauri/target/
+target/
+
+# Bundler / build output
+dist/
+installers/
+
+# OS scratch
+.DS_Store
+Thumbs.db

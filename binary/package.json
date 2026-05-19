@@ -1,0 +1,17 @@
+{
+  "name": "swe-team",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase-2 desktop shell for the SWE agent team",
+  "scripts": {
+    "dev": "tauri dev",
+    "tauri": "tauri",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1"
+  }
+}
