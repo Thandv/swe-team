@@ -58,16 +58,28 @@ python3 -m pip install pyinstaller anthropic
 # On Unix, the filename has no extension.
 NAME="driver-${TRIPLE}"
 
+# PyInstaller has to compute relative paths between workpath, specpath, and
+# the source. On Windows GitHub runners the repo lives on D: while /tmp maps
+# to C:, and Python's `Path.relative_to` blows up on cross-drive paths. Keep
+# build directories on the same drive as the source by putting them next to
+# the driver.
+WORK_DIR="$(pwd)/.build-work"
+SPEC_DIR="$(pwd)/.build-spec"
+rm -rf "${WORK_DIR}" "${SPEC_DIR}"
+
 echo "Building sidecar: ${OUT_DIR}/${NAME}"
 python3 -m PyInstaller \
   --onefile \
   --name "${NAME}" \
   --distpath "${OUT_DIR}" \
-  --workpath /tmp/sidecar-build-work \
-  --specpath /tmp/sidecar-build-spec \
+  --workpath "${WORK_DIR}" \
+  --specpath "${SPEC_DIR}" \
   --collect-all anthropic \
   --noconfirm \
   orchestrator_driver.py
+
+# Tidy up — these are large and not source.
+rm -rf "${WORK_DIR}" "${SPEC_DIR}"
 
 # Tauri expects executable permissions on Unix.
 if [[ -f "${OUT_DIR}/${NAME}" ]]; then

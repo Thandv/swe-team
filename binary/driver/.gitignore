@@ -6,3 +6,7 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
+
+# PyInstaller scratch dirs (kept next to source for cross-drive safety on Windows)
+.build-work/
+.build-spec/
