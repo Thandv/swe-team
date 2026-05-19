@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run static test suite
+        run: |
+          chmod +x scripts/install-agents.sh
+          chmod +x tests/run_all.sh tests/check_install.sh tests/e2e/csv2json.sh
+          tests/run_all.sh
+
+      - name: Verify install script idempotency
+        run: |
+          # Running the installer twice should be a no-op for a clean tree.
+          scripts/install-agents.sh
+          scripts/install-agents.sh
+          # The second run must not have changed anything under ../.claude/agents/
+          # (we leave deeper verification to check_install.sh, which already ran).

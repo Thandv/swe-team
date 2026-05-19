@@ -1,0 +1,61 @@
+name: release
+
+# Builds and publishes the phase-2 installable binary on a tagged push.
+#
+# This workflow is a SCAFFOLD. The binary itself does not exist yet — see
+# binary/README.md for the planned stack decision. Once the stack is picked
+# (Tauri / Electron / PyInstaller), replace the "build" job body with the
+# real build steps and re-enable the publish step.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify static tests still pass
+        if: runner.os != 'Windows'
+        run: |
+          chmod +x scripts/install-agents.sh
+          chmod +x tests/run_all.sh tests/check_install.sh tests/e2e/csv2json.sh
+          tests/run_all.sh
+
+      - name: Build binary (TODO — placeholder)
+        run: |
+          echo "::warning::Binary build is not yet implemented."
+          echo "Once binary/ has a real stack, fill in this step per platform."
+          echo "Expected output: binary/installers/<platform>/<artifact>"
+          mkdir -p binary/installers/${{ runner.os }}
+          echo "placeholder for ${{ runner.os }}" > binary/installers/${{ runner.os }}/PLACEHOLDER
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swe-team-${{ runner.os }}
+          path: binary/installers/${{ runner.os }}/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: false  # enable when there's a real binary to publish
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true

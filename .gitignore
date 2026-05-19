@@ -1,0 +1,25 @@
+# Generated project workspaces — the team produces these; they are not source.
+# To keep one as a reference fixture, add an explicit `!path/` exception below.
+/*-smoke/
+/*-build/
+
+# Phase-2 binary build outputs.
+/binary/dist/
+/binary/build/
+/binary/target/
+/binary/node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local-only Claude artifacts (live under ../.claude/, not in this repo)
