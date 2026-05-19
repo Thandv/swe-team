@@ -1,0 +1,24 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.0.3, pluggy-1.6.0 -- /Users/gokulpm/Claude/SWE/csv2json-service/.venv-qa/bin/python3.14
+cachedir: .pytest_cache
+rootdir: /Users/gokulpm/Claude/SWE/csv2json-service/repo/client
+configfile: pyproject.toml
+plugins: anyio-4.13.0
+collecting ... collected 14 items
+
+tests/test_cli.py::test_build_url_strips_trailing_slash PASSED           [  7%]
+tests/test_cli.py::test_build_url_no_header_true PASSED                  [ 14%]
+tests/test_cli.py::test_success_prints_body_verbatim PASSED              [ 21%]
+tests/test_cli.py::test_no_header_appends_query PASSED                   [ 28%]
+tests/test_cli.py::test_server_url_trailing_slash_stripped PASSED        [ 35%]
+tests/test_cli.py::test_file_not_found_exit_3 PASSED                     [ 42%]
+tests/test_cli.py::test_directory_path_exit_3 PASSED                     [ 50%]
+tests/test_cli.py::test_missing_positional_exit_2 PASSED                 [ 57%]
+tests/test_cli.py::test_help_exits_zero PASSED                           [ 64%]
+tests/test_cli.py::test_network_failure_exit_4 PASSED                    [ 71%]
+tests/test_cli.py::test_server_error_json_body_exit_5 PASSED             [ 78%]
+tests/test_cli.py::test_server_error_415_wrong_content_type PASSED       [ 85%]
+tests/test_cli.py::test_server_error_non_json_body_exit_5 PASSED         [ 92%]
+tests/test_cli.py::test_server_error_json_but_missing_keys PASSED        [100%]
+
+============================== 14 passed in 3.59s ==============================

@@ -1,0 +1,35 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.0.3, pluggy-1.6.0 -- /Users/gokulpm/Claude/SWE/csv2json-service/.venv-qa/bin/python3.14
+cachedir: .pytest_cache
+rootdir: /Users/gokulpm/Claude/SWE/csv2json-service/repo/server
+configfile: pyproject.toml
+plugins: anyio-4.13.0
+collecting ... collected 25 items
+
+tests/test_convert.py::test_empty_string_returns_empty_list PASSED       [  4%]
+tests/test_convert.py::test_header_only_returns_empty_list PASSED        [  8%]
+tests/test_convert.py::test_basic_header_mode PASSED                     [ 12%]
+tests/test_convert.py::test_basic_no_header_mode PASSED                  [ 16%]
+tests/test_convert.py::test_ragged_row_omits_missing_keys PASSED         [ 20%]
+tests/test_convert.py::test_extra_columns_dropped PASSED                 [ 24%]
+tests/test_convert.py::test_no_header_variable_width PASSED              [ 28%]
+tests/test_convert.py::test_quoted_field_with_comma PASSED               [ 32%]
+tests/test_convert.py::test_quoted_field_with_newline PASSED             [ 36%]
+tests/test_convert.py::test_malformed_csv_raises PASSED                  [ 40%]
+tests/test_convert.py::test_malformed_csv_via_strict_path PASSED         [ 44%]
+tests/test_http.py::test_healthz PASSED                                  [ 48%]
+tests/test_http.py::test_convert_happy_path_header_mode PASSED           [ 52%]
+tests/test_http.py::test_convert_happy_path_no_header_mode PASSED        [ 56%]
+tests/test_http.py::test_no_header_case_insensitive PASSED               [ 60%]
+tests/test_http.py::test_content_type_with_charset_accepted PASSED       [ 64%]
+tests/test_http.py::test_empty_body_returns_400_empty_body PASSED        [ 68%]
+tests/test_http.py::test_wrong_content_type_returns_415 PASSED           [ 72%]
+tests/test_http.py::test_missing_content_type_returns_415 PASSED         [ 76%]
+tests/test_http.py::test_wrong_query_value_returns_400 PASSED            [ 80%]
+tests/test_http.py::test_non_utf8_body_returns_malformed_csv PASSED      [ 84%]
+tests/test_http.py::test_get_on_convert_returns_405 PASSED               [ 88%]
+tests/test_http.py::test_unknown_path_returns_404 PASSED                 [ 92%]
+tests/test_http.py::test_ragged_row_omits_keys PASSED                    [ 96%]
+tests/test_http.py::test_header_only_returns_empty_array PASSED          [100%]
+
+============================== 25 passed in 0.40s ==============================

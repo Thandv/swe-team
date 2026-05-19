@@ -1,0 +1,80 @@
+[
+  {
+    "ts": "2026-05-19T00:00:00Z",
+    "role": "pm",
+    "action": "wrote brief from idea.md",
+    "artifacts": ["specs/brief.md"],
+    "next_role": "architect",
+    "notes": "Idea was specific; no user questions needed. Flagged that design/contracts.md is the sync point for parallel backend + client coders — must pin error JSON shape, status codes per failure class, and behavior on empty/header-only CSV."
+  },
+  {
+    "ts": "2026-05-19T00:30:00Z",
+    "role": "architect",
+    "action": "wrote system design, wire contract, and parallel build plan",
+    "artifacts": ["design/system.md", "design/contracts.md", "design/build-plan.md"],
+    "next_role": "coder-backend",
+    "notes": "Framework: FastAPI + uvicorn for the server; stdlib-only (argparse + urllib.request) for the client. File ownership split: repo/server/** to coder-backend, repo/client/** to coder-python — no shared files, no cross-imports, contract is the only sync surface. Decided ambiguities: Content-Type accepts text/csv with parameters; ragged rows omit missing keys; extra columns dropped; header-only CSV returns []; empty body is its own 400 error; added 400 wrong_query for invalid no_header values. Client exit codes: 0 ok, 2 argparse, 3 file, 4 network, 5 non-2xx; stdin '-' not supported in v1. Orchestrator should spawn coder-python in parallel against the same contract."
+  },
+  {
+    "ts": "2026-05-19T01:00:00Z",
+    "role": "coder-backend",
+    "action": "implemented FastAPI server per contract",
+    "artifacts": [
+      "repo/server/pyproject.toml",
+      "repo/server/app/__init__.py",
+      "repo/server/app/main.py",
+      "repo/server/app/convert.py",
+      "repo/server/app/errors.py",
+      "repo/server/app/schemas.py",
+      "repo/server/tests/__init__.py",
+      "repo/server/tests/test_convert.py",
+      "repo/server/tests/test_http.py",
+      "repo/server/README.md"
+    ],
+    "next_role": "qa",
+    "notes": "Implemented POST /convert and GET /healthz per design/contracts.md. CsvError exception with code/detail/status mapped via FastAPI exception handler to the {error,code,detail} JSON shape. Content-Type validation accepts 'text/csv' with optional parameters (case-insensitive primary type). no_header query is case-insensitive 'true'/'false'; anything else yields 400 wrong_query. Empty body -> 400 empty_body; non-UTF8 -> 400 malformed_csv. Catch-all Exception handler returns 500 internal without leaking details. Tests cover every contract row plus ragged rows, quoted fields, header-only, 405/404. Could not execute pytest locally (sandbox denied venv/pip); QA should run `pip install -e \".[dev]\" && pytest` from repo/server/."
+  },
+  {
+    "ts": "2026-05-19T01:00:00Z",
+    "role": "coder-python",
+    "action": "implemented stdlib CLI client per contract",
+    "artifacts": [
+      "repo/client/pyproject.toml",
+      "repo/client/csv2json_client/__init__.py",
+      "repo/client/csv2json_client/cli.py",
+      "repo/client/csv2json_client/http_client.py",
+      "repo/client/tests/__init__.py",
+      "repo/client/tests/test_cli.py",
+      "repo/client/README.md"
+    ],
+    "next_role": "qa",
+    "notes": "Stdlib only: argparse + urllib.request. Entry point csv2json-client = csv2json_client.cli:main. Exit codes per contract: 0 ok, 2 argparse default, 3 file (FileNotFoundError/IsADirectoryError/PermissionError/OSError), 4 NetworkError (URLError/socket.timeout/ConnectionError/OSError from transport), 5 non-2xx. Body printed to stdout.buffer verbatim on 2xx. Server error formatter parses JSON body and uses {code,error,detail} keys when all three present; otherwise falls back to 'non-JSON body: <first-200-chars>'. --server trailing slash stripped before joining with /convert. --no-header appends ?no_header=true. urllib.error.HTTPError (non-2xx) is captured and returned as HttpResult — it is NOT treated as a network error. Tests use stdlib ThreadingHTTPServer fixture on an ephemeral port: success print-through, --no-header query, trailing slash strip, file-not-found (3), directory path (3), missing positional (2), --help (0), connection refused on free port (4), 400 with JSON error body (5), 415 (5), 500 with HTML body (5), 500 with JSON missing required keys (5 via non-JSON branch). Could not execute pytest locally (sandbox denied pip/pytest); QA should run `pip install -e \".[dev]\" && pytest` from repo/client/."
+  },
+  {
+    "ts": "2026-05-19T02:00:00Z",
+    "role": "qa",
+    "action": "wrote test plan, run script, executed full QA suite",
+    "artifacts": [
+      "reports/test-plan.md",
+      "reports/run-tests.sh",
+      "reports/results.md",
+      "reports/fixtures/basic.csv",
+      "reports/fixtures/no_header.csv",
+      "reports/fixtures/empty.csv",
+      "reports/server-pytest.log",
+      "reports/client-pytest.log",
+      "reports/integration.log",
+      "reports/uvicorn.log"
+    ],
+    "next_role": "architect",
+    "notes": "Ran reports/run-tests.sh successfully via the pre-built .venv-qa/ (pytest 9.0.3, Python 3.14.5). Server suite: 25/25 pass. Client suite: 14/14 pass. Integration (live uvicorn on :8765 + live csv2json-client): 4/4 pass — healthz returns {ok:true}; header-mode and no_header-mode end-to-end stdout match expected JSON exactly; empty.csv exits 5 with stderr containing 'empty_body'. TOTAL 43/43 pass, no failures, no deviations from design/contracts.md. Server cd's into repo/server/ for uvicorn so the 'app' package is importable. Ready for architect review."
+  },
+  {
+    "ts": "2026-05-19T02:30:00Z",
+    "role": "architect",
+    "action": "review pass — code quality + contract conformance",
+    "artifacts": ["reports/review.md"],
+    "next_role": "done",
+    "notes": "Verdict: CLEAN. Skimmed both sides against design/contracts.md. Every contract row implemented: Content-Type parsing strips params and lowercases; no_header parsing is case-insensitive true/false with 400 wrong_query fallback; empty body / UTF-8 decode / csv.Error all map to the right 400 codes; 500 handler returns fixed string with no leak; ragged-row omit and extra-cell drop are correct; header-only returns []; error JSON shape is exactly {error,code,detail}. Client cleanly separates transport (NetworkError vs HTTPError-as-HttpResult), exit codes 0/2/3/4/5 all wired, stdout written via buffer verbatim, --server trailing slash stripped, --no-header query appended. No security surface added (stateless, no auth per brief, no shell/fs exposure). Non-blocking follow-ups (do NOT loop): no body-size cap on server or client read — fine for the stated CLI-utility scope, contract calls it out as out of scope. No architectural concerns. QA's 43/43 stands."
+  }
+]

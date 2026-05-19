@@ -1,0 +1,4 @@
+  PASS  healthz returns {ok:true}
+  PASS  client basic.csv -> header mode JSON, exit 0
+  PASS  client --no-header -> indexed JSON, exit 0
+  PASS  client empty.csv -> exit 5 / empty_body

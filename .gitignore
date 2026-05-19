@@ -3,6 +3,10 @@
 /*-smoke/
 /*-build/
 
+# Per-project venvs (e.g. csv2json-service/.venv-qa/ that QA used to run tests).
+**/.venv*/
+**/__pycache__/
+
 # Phase-2 binary build outputs.
 /binary/dist/
 /binary/build/
