@@ -34,7 +34,7 @@ jobs:
             args: "--target aarch64-apple-darwin"
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
-          - platform: ubuntu-22.04
+          - platform: ubuntu-24.04
             args: ""
           - platform: windows-latest
             args: ""
@@ -60,12 +60,14 @@ jobs:
           workspaces: "binary/src-tauri -> target"
 
       - name: Install Linux build deps
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-24.04'
         run: |
           sudo apt-get update
+          # Tauri 2 on Linux needs webkit2gtk 4.1 (ubuntu-24.04 carries it; 22.04 does not).
+          # libappindicator3-dev and libayatana-appindicator3-dev are mutually exclusive —
+          # Tauri 2 uses the ayatana fork.
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
             librsvg2-dev \
             patchelf \
             libayatana-appindicator3-dev \

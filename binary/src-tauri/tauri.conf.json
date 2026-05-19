@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.gokulpm.sweteam",
   "build": {
-    "frontendDist": "../"
+    "frontendDist": "../frontend"
   },
   "app": {
     "withGlobalTauri": true,

@@ -42,6 +42,17 @@ run "check_install.sh"   bash    "$TESTS_DIR/check_install.sh"
 run "check_buildlog.py"  python3 "$TESTS_DIR/check_buildlog.py"
 run "check_protocol.py"  python3 "$TESTS_DIR/check_protocol.py"
 
+# Driver protocol tests live with the driver but run as part of the main
+# suite — they need pytest. Skip cleanly if pytest isn't on PATH.
+DRIVER_DIR="$(cd "$TESTS_DIR/.." && pwd)/binary/driver"
+if command -v pytest >/dev/null 2>&1 || python3 -c 'import pytest' 2>/dev/null; then
+  run "driver protocol" python3 -m pytest "$DRIVER_DIR/tests" -q
+else
+  echo "=== driver protocol ==="
+  echo "  skip: pytest not installed (pip install pytest)"
+  echo
+fi
+
 if [[ $RUN_E2E -eq 1 ]]; then
   run "e2e/csv2json.sh"  bash "$TESTS_DIR/e2e/csv2json.sh"
 fi

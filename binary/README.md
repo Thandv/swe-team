@@ -14,16 +14,22 @@ lands in a follow-up.
 
 ```
 binary/
-  index.html          UI shell (vanilla HTML/CSS)
-  src/main.js         Submit-button wiring (calls Tauri invoke)
-  package.json        Tauri CLI + API dev deps
+  package.json          Tauri CLI + API dev deps
+  frontend/
+    index.html          UI shell (vanilla HTML/CSS) — isolated from src-tauri/, node_modules/
+    src/main.js         Submit wiring; calls the Rust `build_idea` command
   src-tauri/
-    Cargo.toml        Rust crate config
-    tauri.conf.json   App config (window, identifier, bundle)
-    build.rs          Tauri build script
-    src/main.rs       Entry point + `build_idea` placeholder command
-    icons/            Placeholder icon set (replace before release)
-  README.md           This file
+    Cargo.toml          Rust crate config
+    tauri.conf.json     App config; `frontendDist` points at ../frontend
+    build.rs            Tauri build script
+    src/main.rs         Entry point + `build_idea` command (spawns driver subprocess)
+    icons/              Placeholder icon set (replace before release)
+  driver/
+    orchestrator_driver.py   Python driver — runs the team headless over stdio JSON
+    pyproject.toml           Driver package config (deps: anthropic)
+    tests/                   Protocol tests (dry-run, no API key needed)
+    README.md                Driver-specific docs
+  README.md             This file
 ```
 
 ## Stack: Tauri 2

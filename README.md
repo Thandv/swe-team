@@ -2,10 +2,20 @@
 
 A multi-agent software engineering team that takes a product idea and produces working software end-to-end.
 
+## Status
+
+| Layer | State |
+| --- | --- |
+| Agent team (specs, design, code, QA) | **Working.** Smoke-tested end-to-end on a CSV→JSON CLI. |
+| Static test suite (`tests/run_all.sh`) | **Passing.** 4 static checks + 1 gated end-to-end. CI green on every push. |
+| Tauri 2 desktop shell (`binary/`) | **Scaffolded.** Window builds, submit button echoes input via a placeholder Rust command. |
+| Phase 2 driver (orchestrator subprocess) | **First cut in progress.** Python sidecar using the Anthropic Agent SDK. See `binary/driver/`. |
+| Release pipeline | Cross-platform Tauri build on `v*.*.*` tags. Publish gated on signing certs. |
+
 ## Goals
 
 1. **Phase 1 (now)** — drive the team from inside Claude Code via `/swe-build <idea>`.
-2. **Phase 2 (later)** — wrap the same team in a downloadable binary with a "what do you want to build?" screen. The binary embeds the Claude Agent SDK and runs the team without Claude Code installed.
+2. **Phase 2 (in progress)** — wrap the same team in a downloadable binary with a "what do you want to build?" screen. The Tauri shell spawns a Python driver subprocess that embeds the Anthropic Agent SDK and runs the team without Claude Code installed.
 
 The agent definitions, orchestration playbook, and team conventions are **driver-independent** — plain markdown, no Claude-Code-specific syntax in the bodies. Phase 2 swaps the driver, not the team.
 
@@ -45,8 +55,22 @@ When the team builds something, output goes to a user-specified path or, if unse
 
 Drivers:
 
-- **Claude Code (phase 1)** — `.claude/agents/` symlinks expose the team to the Task tool. `/swe-build` is a slash-command shim around the orchestrator.
-- **Standalone binary (phase 2)** — embeds Claude Agent SDK, reads the same files, exposes a UI.
+- **Claude Code (phase 1)** — `scripts/install-agents.sh` writes translated subagent files into `../.claude/agents/`. `/swe-build` is a slash-command shim around the orchestrator playbook. The main session routes work between agents using the Task tool.
+- **Standalone binary (phase 2)** — Tauri 2 shell at `binary/` opens a window with a "what do you want to build?" textarea. Submit invokes a Rust command (`build_idea`) that spawns the Python driver at `binary/driver/` as a subprocess. The driver reads the same `orchestrator.md` / `team-brief.md` / `agents/` files, uses the Anthropic Agent SDK to spawn role agents, and streams events back to the UI over stdio JSON.
+
+```
+┌──────────────────────┐     stdio JSON       ┌──────────────────────┐     HTTPS      ┌──────────────────┐
+│  Tauri shell (Rust)  │ ───────────────────▶ │  Python driver       │ ─────────────▶ │  Anthropic API   │
+│  binary/src-tauri/   │ ◀──────────────────  │  binary/driver/      │ ◀───────────── │  (Claude models) │
+└──────────────────────┘   events: started,   └──────────────────────┘                └──────────────────┘
+        ▲                  handoff, done,            │                                          │
+        │ window event     error                     │ spawns                                   │
+        ▼                                            ▼                                          │
+┌──────────────────────┐                    ┌──────────────────────┐                            │
+│  UI (HTML + JS)      │                    │  Role agent (one of  │ ◀──────────────────────────┘
+│  binary/index.html   │                    │  agents/*.md)        │
+└──────────────────────┘                    └──────────────────────┘
+```
 
 ## Upstream agents
 
