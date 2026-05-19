@@ -16,8 +16,16 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 DRIVER_PARENT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DRIVER_PARENT))
+
+# Skip the whole module if neither SDK is available — these tests verify the
+# driver's adapters to the SDKs, so they're useless without them. CI without
+# the optional deps installed should skip cleanly rather than fail.
+HAVE_ANTHROPIC = pytest.importorskip("anthropic", reason="anthropic SDK not installed")
+HAVE_GENAI = pytest.importorskip("google.genai", reason="google-genai SDK not installed")
 
 
 def _install_placeholder_keys(monkeypatch) -> None:  # noqa: ANN001

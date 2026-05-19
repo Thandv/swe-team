@@ -41,11 +41,21 @@ When multiple coders can work without touching each other's files (per `design/c
 
 **When spawning agents in parallel, tell each one explicitly** (in the spawn prompt) that they are running in parallel with another agent, so they use `scripts/append_buildlog.py` for the BUILD_LOG.json append instead of read-edit-write. The script takes an `fcntl.flock` exclusive lock per call, so concurrent appends serialize without losing entries.
 
+## BUILD_LOG.json — you own it
+
+After each agent returns, append one entry to `<project-root>/BUILD_LOG.json` with shape
+`{ts, role, action, artifacts: [paths], next_role, notes}`. You are the **sole writer** of
+this file — agents do not touch it. They couldn't reliably anyway: the read-modify-write
+pattern spans multiple tool calls and concurrent writes clobber each other, which we saw
+in a live run.
+
+For spawn-parallel coders, append once per agent in the order they return. The Python
+driver does this automatically; under Claude Code, you (the main session) do it directly.
+
 ## What you never do
 
 - Write code, specs, designs, tests, or reviews yourself. If you feel tempted, you're routing wrong — pick the right role and HANDOFF.
 - Modify another role's artifacts. Roles edit their own outputs.
-- Skip `BUILD_LOG.json` appends on behalf of agents that forgot. Instead, send the agent back with a note: "you forgot to log."
 - Ask the user clarifying questions about the *idea*. That's the PM's job. You only ask the user about workspace/path conflicts or unrecoverable failures.
 
 ## Final output

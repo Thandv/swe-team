@@ -488,9 +488,7 @@ class GeminiBackend(Backend):
             system_instruction=system,
             tools=self._to_gemini_tools(tools),
         )
-        response = self.client.models.generate_content(
-            model=model, contents=messages, config=config,
-        )
+        response = self._call_with_backoff(model, messages, config)
         text = ""
         tool_uses: list[ToolUseRequest] = []
         # Use a counter to synthesize stable IDs so we can pair function_response
@@ -515,6 +513,46 @@ class GeminiBackend(Backend):
             stop_reason=stop,
             raw_assistant=raw_parts,
         )
+
+    def _call_with_backoff(self, model: str, messages: list[Any], config: Any, max_attempts: int = 6) -> Any:
+        """Hit Gemini, retrying on 429 RESOURCE_EXHAUSTED and 503 UNAVAILABLE.
+
+        Free tier on gemini-2.5-flash is only 5 req/min, and the shared free
+        pool sometimes returns 503 spikes. Without retry, any multi-turn
+        agent immediately fails. For 429 we use the API's own retryDelay
+        hint when present; for 503 we exponential-backoff (3, 6, 12, 24, 48).
+        """
+        import re as _re
+        import time as _time
+        last_err: Exception | None = None
+        backoff_503 = 3.0
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self.client.models.generate_content(
+                    model=model, contents=messages, config=config,
+                )
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                msg = str(e)
+                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                    delay = 30.0
+                    m = _re.search(r"retryDelay'?\s*[:=]\s*'?(\d+(?:\.\d+)?)s", msg)
+                    if m:
+                        delay = float(m.group(1))
+                    delay = min(max(delay + 1, 5), 90)
+                    reason = "429 quota"
+                elif "503" in msg or "UNAVAILABLE" in msg:
+                    delay = backoff_503
+                    backoff_503 = min(backoff_503 * 2, 60.0)
+                    reason = "503 unavailable"
+                else:
+                    raise
+                if attempt >= max_attempts:
+                    break
+                log("warn", f"gemini {reason}; sleeping {delay:.0f}s (attempt {attempt}/{max_attempts})")
+                _time.sleep(delay)
+        assert last_err is not None
+        raise last_err
 
     def append_assistant(self, messages: list[Any], turn: TurnResult) -> list[Any]:
         T = self._types

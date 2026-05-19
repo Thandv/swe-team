@@ -40,14 +40,11 @@ done OR loop back to the earliest role that needs to fix something
 Every agent, when it finishes its turn, MUST:
 
 1. Write its primary artifacts to the directories above. No artifact = no work happened.
-2. Append a single entry to `BUILD_LOG.json` with: `{ts, role, action, artifacts: [paths], next_role, notes}`. Use the role's short name (`pm`, `architect`, `coder-cpp`, `coder-backend`, `coder-frontend`, `coder-python`, `qa`).
+2. End its response with a one-line **HANDOFF** directive: `HANDOFF: <next-role> — <what they should do first>`. If blocked on the user, use `HANDOFF: user — <question>`.
 
-   **If the orchestrator told you you're running in parallel with another agent** (typically two or more coders on disjoint subtrees), use the helper to avoid a write race:
-   ```
-   <SWE_ROOT>/scripts/append_buildlog.py <project-root> <role> "<action>" '<artifacts-json>' <next-role> "<notes>"
-   ```
-   The helper takes an `fcntl.flock` lock so concurrent calls serialize cleanly. Solo runs may read-edit-write `BUILD_LOG.json` directly; the helper is always safe to use either way.
-3. End its response with a one-line **HANDOFF** directive: `HANDOFF: <next-role> — <what they should do first>`. If blocked on the user, use `HANDOFF: user — <question>`.
+**Do not write `BUILD_LOG.json` yourself.** The orchestrator appends an entry on your behalf after you return — it has the full picture (your role, the artifacts you touched, the handoff target) and is the only writer of that file. Agents that wrote `BUILD_LOG.json` directly during live runs clobbered prior entries because the read-modify-write spans multiple tool calls. The orchestrator owns it; you signal completion via your HANDOFF directive alone.
+
+For parallel-agent runs (multiple coders working in disjoint subtrees), the same rule holds — the orchestrator serializes the appends after each agent returns.
 
 ## Tone and discipline
 
