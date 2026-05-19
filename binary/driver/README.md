@@ -32,10 +32,26 @@ can validate the protocol end-to-end without an API key.
 
 ## Run live (real agents)
 
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export ANTHROPIC_MODEL=claude-sonnet-4-5      # optional, this is the default
+The driver speaks to two LLM backends — pick with `LLM_BACKEND`. Each
+construction is lazy, so you only need the matching SDK and API key for the
+backend you select.
 
+**Anthropic (default):**
+```bash
+export LLM_BACKEND=anthropic    # default
+export ANTHROPIC_API_KEY=sk-ant-...
+# export LLM_MODEL=claude-sonnet-4-5    # optional override
+```
+
+**Google Gemini (free tier at aistudio.google.com):**
+```bash
+export LLM_BACKEND=gemini
+export GEMINI_API_KEY=...        # or GOOGLE_API_KEY
+# export LLM_MODEL=gemini-2.5-flash    # optional override
+```
+
+Then:
+```bash
 echo '{
   "command": "build",
   "idea": "Python CLI that converts CSV to JSON",
@@ -44,6 +60,9 @@ echo '{
   "dry_run": false
 }' | python orchestrator_driver.py
 ```
+
+Adding a new backend: subclass `Backend` in `orchestrator_driver.py`,
+register it in `make_backend()`, and add its default model to `DEFAULT_MODELS`.
 
 ## Protocol
 

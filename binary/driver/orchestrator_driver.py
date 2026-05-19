@@ -57,7 +57,11 @@ from pathlib import Path
 from typing import Any
 
 MAX_ITERATIONS = 30
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEFAULT_BACKEND = "anthropic"
+DEFAULT_MODELS = {
+    "anthropic": "claude-sonnet-4-5",
+    "gemini":    "gemini-2.5-flash",
+}
 VALID_NEXT_ROLES = {
     "pm", "architect", "qa",
     "coder-cpp", "coder-backend", "coder-frontend", "coder-python",
@@ -358,100 +362,246 @@ def build_user_message(idea: str, project_root: Path, role: str, note: str) -> s
     )
 
 
-def run_agent_with_anthropic(
+# ---------- LLM backend abstraction ----------
+#
+# Two backends so far: Anthropic Messages API and Google Gemini. The agent
+# loop below talks to either one via the Backend interface so the team
+# definition, tools, and HANDOFF protocol are unaware of provider quirks.
+# Add a new backend by subclassing Backend and registering it in `make_backend`.
+
+
+@dataclass
+class ToolUseRequest:
+    id: str
+    name: str
+    args: dict[str, Any]
+
+
+@dataclass
+class TurnResult:
+    text: str
+    tool_uses: list[ToolUseRequest]
+    stop_reason: str  # "end_turn" | "tool_use" | "other"
+    raw_assistant: Any  # provider-specific; the backend appends this to history
+
+
+class Backend:
+    """Subclass and register in `make_backend` to add a provider."""
+
+    name: str = "abstract"
+
+    def initial_messages(self, user_text: str) -> Any:
+        raise NotImplementedError
+
+    def call(self, system: str, messages: Any, tools: list[dict], model: str) -> TurnResult:
+        raise NotImplementedError
+
+    def append_assistant(self, messages: Any, turn: TurnResult) -> Any:
+        raise NotImplementedError
+
+    def append_tool_results(
+        self,
+        messages: Any,
+        results: list[tuple[str, str, str]],  # (id, name, result_text)
+    ) -> Any:
+        raise NotImplementedError
+
+
+class AnthropicBackend(Backend):
+    name = "anthropic"
+
+    def __init__(self) -> None:
+        try:
+            from anthropic import Anthropic
+        except ImportError:
+            fatal("anthropic package not installed. Install with: pip install anthropic")
+        self.client = Anthropic()  # picks up ANTHROPIC_API_KEY from env
+
+    def initial_messages(self, user_text: str) -> list[dict]:
+        return [{"role": "user", "content": user_text}]
+
+    def call(self, system: str, messages: list[dict], tools: list[dict], model: str) -> TurnResult:
+        response = self.client.messages.create(
+            model=model, max_tokens=8000, system=system, tools=tools, messages=messages,
+        )
+        text = ""
+        tool_uses: list[ToolUseRequest] = []
+        for block in response.content:
+            if block.type == "text":
+                text = block.text
+            elif block.type == "tool_use":
+                tool_uses.append(ToolUseRequest(id=block.id, name=block.name, args=dict(block.input)))
+        stop = response.stop_reason or "other"
+        if stop not in ("end_turn", "tool_use"):
+            stop = "other"
+        return TurnResult(text=text, tool_uses=tool_uses, stop_reason=stop, raw_assistant=response.content)
+
+    def append_assistant(self, messages: list[dict], turn: TurnResult) -> list[dict]:
+        messages.append({"role": "assistant", "content": turn.raw_assistant})
+        return messages
+
+    def append_tool_results(self, messages: list[dict], results: list[tuple[str, str, str]]) -> list[dict]:
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": tid, "content": text}
+                for tid, _name, text in results
+            ],
+        })
+        return messages
+
+
+class GeminiBackend(Backend):
+    name = "gemini"
+
+    def __init__(self) -> None:
+        try:
+            from google import genai
+            from google.genai import types as gentypes
+        except ImportError:
+            fatal("google-genai package not installed. Install with: pip install google-genai")
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            fatal("GEMINI_API_KEY (or GOOGLE_API_KEY) is required when LLM_BACKEND=gemini")
+        self.client = genai.Client(api_key=api_key)
+        self._types = gentypes
+
+    def initial_messages(self, user_text: str) -> list[Any]:
+        T = self._types
+        return [T.Content(role="user", parts=[T.Part(text=user_text)])]
+
+    def _to_gemini_tools(self, tools: list[dict]) -> list[Any]:
+        T = self._types
+        decls = [
+            T.FunctionDeclaration(
+                name=t["name"],
+                description=t["description"],
+                parameters=t["input_schema"],
+            )
+            for t in tools
+        ]
+        return [T.Tool(function_declarations=decls)] if decls else []
+
+    def call(self, system: str, messages: list[Any], tools: list[dict], model: str) -> TurnResult:
+        T = self._types
+        config = T.GenerateContentConfig(
+            system_instruction=system,
+            tools=self._to_gemini_tools(tools),
+        )
+        response = self.client.models.generate_content(
+            model=model, contents=messages, config=config,
+        )
+        text = ""
+        tool_uses: list[ToolUseRequest] = []
+        # Use a counter to synthesize stable IDs so we can pair function_response
+        # with the right function_call when there are duplicates.
+        seq = 0
+        candidate = response.candidates[0] if response.candidates else None
+        raw_parts = []
+        if candidate and candidate.content and candidate.content.parts:
+            for part in candidate.content.parts:
+                raw_parts.append(part)
+                if getattr(part, "text", None):
+                    text = part.text
+                fc = getattr(part, "function_call", None)
+                if fc and fc.name:
+                    seq += 1
+                    args = dict(fc.args) if fc.args else {}
+                    tool_uses.append(ToolUseRequest(id=f"gem-{seq}", name=fc.name, args=args))
+        stop = "tool_use" if tool_uses else "end_turn"
+        return TurnResult(
+            text=text,
+            tool_uses=tool_uses,
+            stop_reason=stop,
+            raw_assistant=raw_parts,
+        )
+
+    def append_assistant(self, messages: list[Any], turn: TurnResult) -> list[Any]:
+        T = self._types
+        messages.append(T.Content(role="model", parts=turn.raw_assistant))
+        return messages
+
+    def append_tool_results(self, messages: list[Any], results: list[tuple[str, str, str]]) -> list[Any]:
+        T = self._types
+        parts = [
+            T.Part(function_response=T.FunctionResponse(
+                name=name,
+                response={"result": text},
+            ))
+            for _id, name, text in results
+        ]
+        messages.append(T.Content(role="user", parts=parts))
+        return messages
+
+
+def make_backend(name: str | None = None) -> Backend:
+    name = (name or os.environ.get("LLM_BACKEND") or DEFAULT_BACKEND).lower().strip()
+    if name == "anthropic":
+        return AnthropicBackend()
+    if name == "gemini":
+        return GeminiBackend()
+    fatal(f"unknown LLM_BACKEND={name!r}; valid: anthropic, gemini")
+
+
+# ---------- provider-agnostic agent loop ----------
+
+def run_agent_live(
     role: str,
     role_text: str,
     team_brief: str,
     project_root: Path,
     note: str,
     idea: str,
+    backend: Backend,
     model: str,
 ) -> AgentResult:
-    """Real agent loop using the Anthropic Messages API."""
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        fatal(
-            "anthropic package not installed. "
-            "Install with: pip install anthropic"
-        )
-
-    client = Anthropic()
+    """Drive a real LLM through the team's HANDOFF protocol, backend-agnostic."""
     system = build_system_prompt(team_brief, role_text)
     tools = tools_for_role(role_text)
-    log("debug", f"{role}: tools granted = {[t['name'] for t in tools]}")
-    messages: list[dict[str, Any]] = [
-        {"role": "user", "content": build_user_message(idea, project_root, role, note)},
-    ]
+    log("debug", f"{role}: backend={backend.name} model={model} tools={[t['name'] for t in tools]}")
+    messages = backend.initial_messages(
+        build_user_message(idea, project_root, role, note)
+    )
     artifacts_touched: list[str] = []
     final_text = ""
 
-    # Tool-use loop: keep going until the model stops without requesting tools.
     for turn in range(20):  # per-agent turn cap
-        response = client.messages.create(
-            model=model,
-            max_tokens=8000,
-            system=system,
-            tools=tools,
-            messages=messages,
-        )
-        # Append the assistant turn to the conversation as-is.
-        messages.append({"role": "assistant", "content": response.content})
+        turn_result = backend.call(system, messages, tools, model)
+        messages = backend.append_assistant(messages, turn_result)
+        if turn_result.text:
+            final_text = turn_result.text
 
-        # If the model produced text, accumulate it (we want the last text block's HANDOFF).
-        for block in response.content:
-            if block.type == "text":
-                final_text = block.text
-            elif block.type == "tool_use":
-                pass  # handled below
-
-        if response.stop_reason == "end_turn":
+        if turn_result.stop_reason == "end_turn":
             break
 
-        if response.stop_reason == "tool_use":
-            tool_results = []
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-                log("debug", f"{role}: tool_use {block.name}({list(block.input.keys())})")
-                try:
-                    result = execute_tool(block.name, block.input, project_root)
-                except Exception as e:  # noqa: BLE001
-                    result = f"ERROR: {type(e).__name__}: {e}"
-                # Track writes as artifacts.
-                if block.name in ("write_file", "append_file"):
-                    p = block.input.get("path")
+        if turn_result.stop_reason == "tool_use":
+            results: list[tuple[str, str, str]] = []
+            for use in turn_result.tool_uses:
+                log("debug", f"{role}: tool_use {use.name}({list(use.args.keys())})")
+                output = execute_tool(use.name, use.args, project_root)
+                if use.name in ("write_file", "append_file"):
+                    p = use.args.get("path")
                     if p and p not in artifacts_touched:
                         artifacts_touched.append(p)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result,
-                })
-            messages.append({"role": "user", "content": tool_results})
+                results.append((use.id, use.name, output))
+            messages = backend.append_tool_results(messages, results)
             continue
 
-        # Any other stop_reason (max_tokens, etc.) — bail.
-        log("warn", f"{role}: unexpected stop_reason={response.stop_reason}")
+        log("warn", f"{role}: unexpected stop_reason={turn_result.stop_reason!r}; bailing")
         break
     else:
         log("warn", f"{role}: hit per-agent turn cap")
 
-    # Parse HANDOFF from the final text block.
     handoff = parse_handoff(final_text)
     if not handoff:
         return AgentResult(
-            role=role,
-            artifacts=artifacts_touched,
-            handoff_target="done",
+            role=role, artifacts=artifacts_touched, handoff_target="done",
             notes="agent ended without HANDOFF directive — assuming done",
         )
     target, note_out = handoff
     if target not in VALID_NEXT_ROLES:
         return AgentResult(
-            role=role,
-            artifacts=artifacts_touched,
-            handoff_target="done",
+            role=role, artifacts=artifacts_touched, handoff_target="done",
             notes=f"agent emitted invalid HANDOFF target {target!r}; assuming done",
         )
     return AgentResult(
@@ -532,7 +682,20 @@ def run_team(request: dict[str, Any]) -> None:
     dry_run = bool(request.get("dry_run", False))
     # Test-only: in dry-run, force the named role to ask one user question.
     dry_run_ask_role = request.get("_dry_run_ask_role")
-    model = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
+
+    # Backend selection: env var picks anthropic | gemini. Default anthropic.
+    # The model can be overridden via LLM_MODEL or the per-backend defaults.
+    backend_name = os.environ.get("LLM_BACKEND", DEFAULT_BACKEND).lower().strip()
+    model = (
+        os.environ.get("LLM_MODEL")
+        or os.environ.get("ANTHROPIC_MODEL")  # legacy
+        or DEFAULT_MODELS.get(backend_name, DEFAULT_MODELS["anthropic"])
+    )
+    # Construct backend lazily so dry-run mode doesn't require any API key.
+    backend: Backend | None = None
+    if not dry_run:
+        backend = make_backend(backend_name)
+        log("info", f"using backend={backend_name} model={model}")
 
     # Validate SWE root has what we need.
     for required in ("team-brief.md", "orchestrator.md", "agents"):
@@ -580,13 +743,15 @@ def run_team(request: dict[str, Any]) -> None:
             if dry_run:
                 result = run_agent_stub(next_role, note, project_root, ask_role=dry_run_ask_role)
             else:
-                result = run_agent_with_anthropic(
+                assert backend is not None  # set above when not dry_run
+                result = run_agent_live(
                     role=next_role,
                     role_text=role_text,
                     team_brief=team_brief,
                     project_root=project_root,
                     note=note,
                     idea=idea,
+                    backend=backend,
                     model=model,
                 )
         except Exception as e:  # noqa: BLE001

@@ -6,7 +6,12 @@ requires-python = ">=3.11"
 authors = [{ name = "gokulpm" }]
 license = "MIT"
 dependencies = [
+    # Both backends are declared as core deps so the shipped sidecar can talk
+    # to either provider without an `extras_require` install dance. Each
+    # backend is constructed lazily — neither import happens unless the
+    # matching LLM_BACKEND value is selected.
     "anthropic>=0.40",
+    "google-genai>=0.7",
 ]
 
 [project.optional-dependencies]
