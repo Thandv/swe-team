@@ -39,6 +39,8 @@ Track the current `next_role` (start with `pm`). Each iteration:
 
 When multiple coders can work without touching each other's files (per `design/contracts.md`), spawn them in parallel. Wait for all to return before advancing to QA. If one fails, surface that result but let the others complete.
 
+**When spawning agents in parallel, tell each one explicitly** (in the spawn prompt) that they are running in parallel with another agent, so they use `scripts/append_buildlog.py` for the BUILD_LOG.json append instead of read-edit-write. The script takes an `fcntl.flock` exclusive lock per call, so concurrent appends serialize without losing entries.
+
 ## What you never do
 
 - Write code, specs, designs, tests, or reviews yourself. If you feel tempted, you're routing wrong — pick the right role and HANDOFF.

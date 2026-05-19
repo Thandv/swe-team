@@ -97,5 +97,80 @@ them to Claude Code tools.
 
 `.github/workflows/release.yml` runs the cross-platform Tauri build matrix
 on tagged pushes (`v*.*.*`) and uploads per-OS artifacts. Code signing and
-GitHub Release publishing are gated off until we have a signing setup —
-flip the `publish` job's `if:` to enable it.
+GitHub Release publishing are gated off until you've configured signing —
+see the next section.
+
+## Before shipping a signed release
+
+Three things to get in order. None block the CI build itself — they only
+gate the `publish` job in `release.yml` (currently `if: false`).
+
+### 1. Replace the placeholder icons
+
+`src-tauri/icons/` ships with single-color PNG placeholders generated from
+Python `zlib`. They're enough to satisfy Tauri's icon requirement but not
+fit for distribution. Replace them with real branding:
+
+```
+src-tauri/icons/
+  32x32.png            Required, used for taskbars
+  128x128.png          Required
+  128x128@2x.png       Required, retina
+  icon.icns            macOS bundle (Tauri can generate from a 1024×1024 PNG)
+  icon.ico             Windows installer
+  Square30x30Logo.png  Microsoft Store sizes; needed if you target MS Store
+  Square44x44Logo.png  …through Square310x310Logo.png + StoreLogo.png
+```
+
+Fastest path: produce one 1024×1024 source PNG, then run
+`npx @tauri-apps/cli icon path/to/source.png` from `binary/` — it emits
+every size and format Tauri's bundler wants.
+
+### 2. Wire macOS signing + notarization
+
+GitHub repo secrets to set (Settings → Secrets and variables → Actions):
+
+| Secret | What it is |
+| --- | --- |
+| `APPLE_CERTIFICATE` | Developer ID Application cert, base64-encoded p12. `base64 -i cert.p12 \| pbcopy`. |
+| `APPLE_CERTIFICATE_PASSWORD` | Password for the p12. |
+| `APPLE_SIGNING_IDENTITY` | E.g. `Developer ID Application: Your Name (TEAMID)`. |
+| `APPLE_ID` | The Apple ID email used for notarization. |
+| `APPLE_PASSWORD` | App-specific password generated at appleid.apple.com. |
+| `APPLE_TEAM_ID` | 10-character team ID from your Apple Developer account. |
+
+In `release.yml`, the macOS legs of the build matrix need an additional env
+block referencing those secrets. `tauri-apps/tauri-action` picks them up
+automatically when present.
+
+### 3. Wire Windows signing
+
+| Secret | What it is |
+| --- | --- |
+| `WINDOWS_CERTIFICATE` | Base64-encoded `.pfx` of your code-signing cert. |
+| `WINDOWS_CERTIFICATE_PASSWORD` | Password for the pfx. |
+
+Add to `tauri.conf.json > bundle > windows > certificateThumbprint` (or use
+the action's env-var passthrough). Without these, Windows still builds an
+`.exe` and `.msi`, but they trigger SmartScreen warnings on install.
+
+### 4. Flip the publish job on
+
+Once the matrix builds reliably with signing, change `release.yml`:
+
+```yaml
+publish:
+  needs: build
+  runs-on: ubuntu-latest
+  if: true   # was: false
+```
+
+The job downloads every per-OS artifact and creates a GitHub Release using
+`softprops/action-gh-release@v2`. Release notes are auto-generated from
+commits since the previous tag.
+
+### Linux (no signing needed)
+
+The Linux leg already produces `.deb` and `.AppImage` artifacts. No certs
+needed — users can install directly. If you publish to a package manager
+(apt, Flatpak, Snap), that's a separate workflow.

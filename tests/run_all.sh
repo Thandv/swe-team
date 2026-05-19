@@ -37,10 +37,11 @@ run() {
   fi
 }
 
-run "lint_agents.py"     python3 "$TESTS_DIR/lint_agents.py"
-run "check_install.sh"   bash    "$TESTS_DIR/check_install.sh"
-run "check_buildlog.py"  python3 "$TESTS_DIR/check_buildlog.py"
-run "check_protocol.py"  python3 "$TESTS_DIR/check_protocol.py"
+run "lint_agents.py"           python3 "$TESTS_DIR/lint_agents.py"
+run "check_install.sh"         bash    "$TESTS_DIR/check_install.sh"
+run "check_buildlog.py"        python3 "$TESTS_DIR/check_buildlog.py"
+run "check_protocol.py"        python3 "$TESTS_DIR/check_protocol.py"
+run "test_append_buildlog.py"  python3 "$TESTS_DIR/test_append_buildlog.py"
 
 # Driver protocol tests live with the driver but run as part of the main
 # suite — they need pytest. Skip cleanly if pytest isn't on PATH.

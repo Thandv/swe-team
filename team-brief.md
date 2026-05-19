@@ -41,6 +41,12 @@ Every agent, when it finishes its turn, MUST:
 
 1. Write its primary artifacts to the directories above. No artifact = no work happened.
 2. Append a single entry to `BUILD_LOG.json` with: `{ts, role, action, artifacts: [paths], next_role, notes}`. Use the role's short name (`pm`, `architect`, `coder-cpp`, `coder-backend`, `coder-frontend`, `coder-python`, `qa`).
+
+   **If the orchestrator told you you're running in parallel with another agent** (typically two or more coders on disjoint subtrees), use the helper to avoid a write race:
+   ```
+   <SWE_ROOT>/scripts/append_buildlog.py <project-root> <role> "<action>" '<artifacts-json>' <next-role> "<notes>"
+   ```
+   The helper takes an `fcntl.flock` lock so concurrent calls serialize cleanly. Solo runs may read-edit-write `BUILD_LOG.json` directly; the helper is always safe to use either way.
 3. End its response with a one-line **HANDOFF** directive: `HANDOFF: <next-role> — <what they should do first>`. If blocked on the user, use `HANDOFF: user — <question>`.
 
 ## Tone and discipline

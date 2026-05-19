@@ -17,7 +17,7 @@ jobs:
   static-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run static tests
         run: |
           chmod +x scripts/install-agents.sh
@@ -42,10 +42,10 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
 
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: swe-team-${{ matrix.platform }}-${{ strategy.job-index }}
           path: |
@@ -106,7 +106,7 @@ jobs:
     if: false  # enable when there's a signing setup and we want a real release
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist/
 
