@@ -147,58 +147,89 @@ def now_iso() -> str:
 
 
 # ---------- tool definitions for Anthropic Messages API ----------
+#
+# Tools are grouped by capability so we can hand each agent only the tools its
+# role frontmatter declared. The capability vocabulary matches team-brief.md.
 
-TOOLS = [
-    {
-        "name": "read_file",
-        "description": "Read a UTF-8 text file under the project root and return its contents.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string",
-                         "description": "Path relative to the project root."},
-            },
-            "required": ["path"],
+_TOOL_READ_FILE = {
+    "name": "read_file",
+    "description": "Read a UTF-8 text file under the project root and return its contents.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path relative to the project root."},
         },
+        "required": ["path"],
     },
-    {
-        "name": "write_file",
-        "description": "Write (or overwrite) a UTF-8 text file under the project root.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string",
-                         "description": "Path relative to the project root."},
-                "content": {"type": "string",
-                            "description": "Full file contents."},
-            },
-            "required": ["path", "content"],
+}
+
+_TOOL_WRITE_FILE = {
+    "name": "write_file",
+    "description": "Write (or overwrite) a UTF-8 text file under the project root.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path relative to the project root."},
+            "content": {"type": "string", "description": "Full file contents."},
         },
+        "required": ["path", "content"],
     },
-    {
-        "name": "append_file",
-        "description": "Append text to a UTF-8 file under the project root. Creates the file if missing.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"},
-            },
-            "required": ["path", "content"],
+}
+
+_TOOL_APPEND_FILE = {
+    "name": "append_file",
+    "description": "Append text to a UTF-8 file under the project root. Creates the file if missing.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"},
         },
+        "required": ["path", "content"],
     },
-    {
-        "name": "list_dir",
-        "description": "List entries (files + subdirs) under a directory relative to the project root.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Directory path relative to project root. Use '' for the root itself."},
-            },
-            "required": ["path"],
+}
+
+_TOOL_LIST_DIR = {
+    "name": "list_dir",
+    "description": "List entries (files + subdirs) under a directory relative to the project root.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Directory path relative to project root. Use '' for the root itself."},
         },
+        "required": ["path"],
     },
-]
+}
+
+_TOOL_BASH = {
+    "name": "bash",
+    "description": (
+        "Run a bash command from the project root. Use this to run tests, "
+        "compile code, start servers, or any other shell operation needed to "
+        "verify work. The command runs with the same privileges as the driver; "
+        "agents are trusted not to do destructive things outside the project "
+        "root. Default timeout 60s, max 300s."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "The bash command line. Runs with shell=True."},
+            "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds. Default 60, max 300.", "minimum": 1, "maximum": 300},
+        },
+        "required": ["command"],
+    },
+}
+
+# Map each portable capability to the concrete tools it grants.
+CAPABILITY_TO_TOOLS: dict[str, list[dict]] = {
+    "read":  [_TOOL_READ_FILE, _TOOL_LIST_DIR],
+    "edit":  [_TOOL_WRITE_FILE, _TOOL_APPEND_FILE],
+    "shell": [_TOOL_BASH],
+    # `web` and `spawn` are declared by some agents but not yet implemented
+    # in the driver — they map to empty tool lists for now.
+    "web":   [],
+    "spawn": [],
+}
 
 
 def _safe_resolve(project_root: Path, rel: str) -> Path:
@@ -209,7 +240,24 @@ def _safe_resolve(project_root: Path, rel: str) -> Path:
 
 
 def execute_tool(name: str, args: dict[str, Any], project_root: Path) -> str:
-    """Run a tool the agent requested. Returns a string (the tool result block)."""
+    """Run a tool the agent requested. Returns a string (the tool result block).
+
+    Always returns a string — sandbox violations (paths outside the project
+    root) and other expected failures are caught and reported as `ERROR: ...`
+    so the agent gets a useful tool-result to react to instead of an
+    unhandled exception in the loop.
+    """
+    try:
+        return _execute_tool_inner(name, args, project_root)
+    except PermissionError as e:
+        return f"ERROR: PermissionError: {e}"
+    except FileNotFoundError as e:
+        return f"ERROR: FileNotFoundError: {e}"
+    except (OSError, ValueError) as e:
+        return f"ERROR: {type(e).__name__}: {e}"
+
+
+def _execute_tool_inner(name: str, args: dict[str, Any], project_root: Path) -> str:
     if name == "read_file":
         path = _safe_resolve(project_root, args["path"])
         if not path.is_file():
@@ -232,7 +280,60 @@ def execute_tool(name: str, args: dict[str, Any], project_root: Path) -> str:
             return f"ERROR: {args['path']} is not a directory"
         entries = sorted(p.name + ("/" if p.is_dir() else "") for p in path.iterdir())
         return "\n".join(entries) or "(empty)"
+    if name == "bash":
+        import subprocess
+        cmd = args["command"]
+        timeout = min(int(args.get("timeout_seconds", 60)), 300)
+        try:
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            return f"TIMEOUT after {timeout}s\nstdout (partial):\n{e.stdout or ''}\nstderr (partial):\n{e.stderr or ''}"
+        # Truncate output the model can't usefully consume.
+        stdout = proc.stdout[:50_000]
+        stderr = proc.stderr[:10_000]
+        suffix_stdout = "\n…(truncated)" if len(proc.stdout) > 50_000 else ""
+        suffix_stderr = "\n…(truncated)" if len(proc.stderr) > 10_000 else ""
+        return (
+            f"exit_code: {proc.returncode}\n"
+            f"--- stdout ---\n{stdout}{suffix_stdout}\n"
+            f"--- stderr ---\n{stderr}{suffix_stderr}"
+        )
     return f"ERROR: unknown tool {name!r}"
+
+
+# ---------- frontmatter parsing for capability gating ----------
+
+def parse_role_capabilities(role_text: str) -> list[str]:
+    """Extract the `tools:` list from the agent file's YAML frontmatter."""
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n", role_text, re.DOTALL)
+    if not m:
+        return []
+    fm = m.group(1)
+    tools_match = re.search(r"^tools:\s*(.+)$", fm, re.MULTILINE)
+    if not tools_match:
+        return []
+    raw = tools_match.group(1).strip().strip("[]")
+    return [c.strip().strip("'\"") for c in raw.split(",") if c.strip()]
+
+
+def tools_for_role(role_text: str) -> list[dict]:
+    """Return the JSON tool definitions an agent gets based on its declared caps."""
+    caps = parse_role_capabilities(role_text)
+    seen: set[str] = set()
+    tools: list[dict] = []
+    for cap in caps:
+        for t in CAPABILITY_TO_TOOLS.get(cap, []):
+            if t["name"] not in seen:
+                seen.add(t["name"])
+                tools.append(t)
+    return tools
 
 
 # ---------- agent invocation ----------
@@ -277,6 +378,8 @@ def run_agent_with_anthropic(
 
     client = Anthropic()
     system = build_system_prompt(team_brief, role_text)
+    tools = tools_for_role(role_text)
+    log("debug", f"{role}: tools granted = {[t['name'] for t in tools]}")
     messages: list[dict[str, Any]] = [
         {"role": "user", "content": build_user_message(idea, project_root, role, note)},
     ]
@@ -289,7 +392,7 @@ def run_agent_with_anthropic(
             model=model,
             max_tokens=8000,
             system=system,
-            tools=TOOLS,
+            tools=tools,
             messages=messages,
         )
         # Append the assistant turn to the conversation as-is.
@@ -360,8 +463,21 @@ def run_agent_with_anthropic(
     )
 
 
-def run_agent_stub(role: str, note: str, project_root: Path) -> AgentResult:
-    """Dry-run stub. Writes a marker file and hands off to the next role in the chain."""
+def run_agent_stub(role: str, note: str, project_root: Path, ask_role: str | None = None) -> AgentResult:
+    """Dry-run stub. Writes a marker file and hands off to the next role in the chain.
+
+    `ask_role` (test-only): if set and matches the current role, return a
+    HANDOFF: user once instead of advancing. The user's answer comes back as
+    a note starting with `User answered`, so on the retry we proceed normally.
+    """
+    if ask_role and role == ask_role and not note.startswith("User answered"):
+        return AgentResult(
+            role=role,
+            artifacts=[],
+            handoff_target="user",
+            notes=f"Stub question from {role}: what's the budget?",
+            user_question=f"Stub question from {role}: what's the budget?",
+        )
     chain = {
         "pm": "architect",
         "architect": "coder-python",
@@ -414,6 +530,8 @@ def run_team(request: dict[str, Any]) -> None:
     swe_root = Path(request["swe_root"]).resolve()
     parent_dir = Path(request["parent_dir"]).resolve()
     dry_run = bool(request.get("dry_run", False))
+    # Test-only: in dry-run, force the named role to ask one user question.
+    dry_run_ask_role = request.get("_dry_run_ask_role")
     model = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
 
     # Validate SWE root has what we need.
@@ -429,14 +547,27 @@ def run_team(request: dict[str, Any]) -> None:
 
     next_role: str = "pm"
     note: str = idea
+    # `last_role` tracks who ran the previous turn — needed so we can resume
+    # the right agent after a HANDOFF: user → user_answer round-trip.
+    last_role: str | None = None
 
     for iteration in range(MAX_ITERATIONS):
         if next_role == "done":
             emit("done", project_root=str(project_root), summary=note)
             return
         if next_role == "user":
-            emit("user_question", role="(previous)", question=note)
-            fatal("user follow-up not wired through driver yet — phase 2.1", code=3)
+            # The previously-spawned agent asked the user something.
+            # Surface the question, then block on stdin for the user's answer.
+            asker = last_role or "unknown"
+            emit("user_question", role=asker, question=note)
+            answer = _wait_for_user_answer()
+            if answer is None:
+                fatal("driver stdin closed while waiting for user_answer", code=3)
+            # Resume the same role with the user's answer as the new note.
+            log("info", f"resuming {asker} with user answer ({len(answer)} chars)")
+            next_role = asker
+            note = f"User answered your question:\n\n{answer}"
+            continue
 
         role_file = agents_dir / f"{next_role}.md"
         if not role_file.is_file():
@@ -447,7 +578,7 @@ def run_team(request: dict[str, Any]) -> None:
 
         try:
             if dry_run:
-                result = run_agent_stub(next_role, note, project_root)
+                result = run_agent_stub(next_role, note, project_root, ask_role=dry_run_ask_role)
             else:
                 result = run_agent_with_anthropic(
                     role=next_role,
@@ -476,10 +607,38 @@ def run_team(request: dict[str, Any]) -> None:
              handoff_target=result.handoff_target,
              notes=result.notes)
 
+        last_role = result.role
         next_role = result.handoff_target
         note = result.notes
 
     fatal(f"hit MAX_ITERATIONS={MAX_ITERATIONS} without reaching done")
+
+
+def _wait_for_user_answer() -> str | None:
+    """Block reading lines from stdin until a `user_answer` command arrives.
+
+    Returns the answer string, or None if stdin closed first. Lines that
+    aren't valid JSON or aren't a `user_answer` command are logged and
+    skipped so the protocol stays forgiving.
+    """
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            return None
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as e:
+            log("warn", f"ignored non-JSON line on stdin: {e}")
+            continue
+        cmd = obj.get("command")
+        if cmd == "user_answer" and isinstance(obj.get("answer"), str):
+            return obj["answer"]
+        if cmd == "cancel":
+            return None
+        log("warn", f"ignored unexpected command on stdin: {cmd!r}")
 
 
 def main() -> int:

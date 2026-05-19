@@ -32,12 +32,16 @@ jobs:
         include:
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
+            triple: "aarch64-apple-darwin"
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
+            triple: "x86_64-apple-darwin"
           - platform: ubuntu-24.04
             args: ""
+            triple: "x86_64-unknown-linux-gnu"
           - platform: windows-latest
             args: ""
+            triple: "x86_64-pc-windows-msvc"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -81,6 +85,18 @@ jobs:
       - name: Install frontend deps
         working-directory: binary
         run: npm ci || npm install
+
+      - name: Set up Python for driver sidecar
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build driver sidecar (PyInstaller)
+        working-directory: binary/driver
+        shell: bash
+        env:
+          TAURI_TARGET: ${{ matrix.triple }}
+        run: ./build-sidecar.sh
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

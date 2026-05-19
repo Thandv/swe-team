@@ -111,12 +111,14 @@
     ></textarea>
     <div class="row">
       <button id="submit" type="button">Submit</button>
+      <button id="cancel" type="button" style="display: none; background: #6b7280;">Cancel</button>
       <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem;">
         <input id="dryRun" type="checkbox" checked />
         dry-run (no API key needed)
       </label>
     </div>
     <div id="output" class="output"></div>
+    <div id="question" style="display: none; padding: 0.85rem 1rem; border: 1px solid #f59e0b; border-radius: 6px; background: #fffbeb;"></div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

@@ -11,8 +11,8 @@
     "windows": [
       {
         "title": "SWE Team",
-        "width": 800,
-        "height": 600,
+        "width": 900,
+        "height": 700,
         "resizable": true,
         "fullscreen": false
       }
@@ -30,6 +30,20 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": [
+      "binaries/driver"
+    ],
+    "resources": {
+      "../../team-brief.md": "team-brief.md",
+      "../../orchestrator.md": "orchestrator.md",
+      "../../agents/architect.md": "agents/architect.md",
+      "../../agents/coder-backend.md": "agents/coder-backend.md",
+      "../../agents/coder-cpp.md": "agents/coder-cpp.md",
+      "../../agents/coder-frontend.md": "agents/coder-frontend.md",
+      "../../agents/coder-python.md": "agents/coder-python.md",
+      "../../agents/pm.md": "agents/pm.md",
+      "../../agents/qa.md": "agents/qa.md"
+    }
   }
 }

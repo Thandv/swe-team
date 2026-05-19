@@ -8,6 +8,9 @@ yarn-error.log*
 src-tauri/target/
 target/
 
+# PyInstaller-built sidecars — produced per-platform in CI, not committed.
+src-tauri/binaries/
+
 # Bundler / build output
 dist/
 installers/
