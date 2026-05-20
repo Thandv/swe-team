@@ -38,10 +38,29 @@ Exit codes
   3  hit a `HANDOFF: user — ...` and the driver isn't wired for interactive
      follow-ups yet (UI integration deferred to phase 2.1)
 
-Env
----
-  ANTHROPIC_API_KEY   required unless dry_run=true
-  ANTHROPIC_MODEL     optional, default "claude-sonnet-4-5"
+Env / keys
+----------
+  LLM_BACKEND         anthropic (default) | gemini
+  LLM_MODEL           overrides the per-backend default
+  ANTHROPIC_API_KEY   required when LLM_BACKEND=anthropic and dry_run=false
+  GEMINI_API_KEY      required when LLM_BACKEND=gemini and dry_run=false
+                      (GOOGLE_API_KEY also accepted)
+
+Instead of exporting these in your shell every time, you can drop them into
+a `keys.env` file with `KEY=value` lines and the driver will pick them up
+on startup. Searched in this order, first match wins:
+
+  1. $SWE_TEAM_KEYS                          (custom path)
+  2. ./keys.env                              (cwd, useful during dev)
+  3. ./binary/driver/keys.env                (colocated with the driver)
+  4. ~/.config/swe-team/keys.env             (XDG-style canonical location)
+  5. ~/.swe-team/keys.env                    (fallback)
+
+Existing environment variables ALWAYS take precedence over the file — the
+loader uses os.environ.setdefault. So you can override per-session by
+exporting in your shell, and the file is the persistent default.
+
+`keys.env` MUST NOT be committed; every standard location is gitignored.
 """
 
 from __future__ import annotations
@@ -67,6 +86,67 @@ VALID_NEXT_ROLES = {
     "coder-cpp", "coder-backend", "coder-frontend", "coder-python",
     "user", "done",
 }
+
+
+# ---------- keys file ----------
+
+def _parse_env_file(text: str) -> dict[str, str]:
+    """Parse a .env-style file: KEY=value per line, # comments, blanks ignored.
+
+    Values are NOT shell-unquoted; everything after the first `=` is taken
+    literally with surrounding whitespace stripped. This keeps the format
+    obvious (paste the key as-is, no quotes to escape).
+    """
+    result: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        # Strip surrounding quotes if present, but don't process escapes.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        result[key] = value
+    return result
+
+
+def _key_file_candidates() -> list[Path]:
+    paths: list[Path] = []
+    custom = os.environ.get("SWE_TEAM_KEYS")
+    if custom:
+        paths.append(Path(custom).expanduser())
+    paths.extend([
+        Path.cwd() / "keys.env",
+        Path.cwd() / "binary" / "driver" / "keys.env",
+        Path.home() / ".config" / "swe-team" / "keys.env",
+        Path.home() / ".swe-team" / "keys.env",
+    ])
+    return paths
+
+
+def load_keys_from_file() -> Path | None:
+    """Find a keys.env at a standard location and merge it into os.environ.
+
+    Existing env vars take precedence (setdefault), so a shell `export`
+    overrides the file. Returns the path that was loaded, or None.
+    """
+    for path in _key_file_candidates():
+        if not path.is_file():
+            continue
+        try:
+            entries = _parse_env_file(path.read_text())
+        except OSError:
+            continue
+        for k, v in entries.items():
+            os.environ.setdefault(k, v)
+        return path
+    return None
 
 
 # ---------- protocol ----------
@@ -845,6 +925,15 @@ def _wait_for_user_answer() -> str | None:
 
 
 def main() -> int:
+    # Load API keys / config from a standard non-committed file, if present.
+    # The shell env still wins (setdefault semantics) so users who export
+    # explicitly aren't surprised.
+    loaded = load_keys_from_file()
+    if loaded is not None:
+        # Don't log the contents — just the path so the user knows which file
+        # was picked up. Useful when debugging "why isn't my key working".
+        log("info", f"loaded keys from {loaded}")
+
     try:
         line = sys.stdin.readline()
         if not line.strip():

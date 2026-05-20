@@ -27,3 +27,12 @@ venv/
 *.swp
 
 # Local-only Claude artifacts (live under ../.claude/, not in this repo)
+
+# Secret keys — the driver reads these from keys.env files at standard paths.
+# Never commit. Catches the common typos too (.env, .keys.env, etc.).
+keys.env
+**/keys.env
+.env
+**/.env
+*.key
+**/*.key

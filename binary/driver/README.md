@@ -36,18 +36,45 @@ The driver speaks to two LLM backends — pick with `LLM_BACKEND`. Each
 construction is lazy, so you only need the matching SDK and API key for the
 backend you select.
 
-**Anthropic (default):**
+### Where the key lives
+
+Two equally-valid options. **Existing shell env vars always win** over the
+file, so you can mix them (file for the persistent default, env for a
+one-off override).
+
+**Option A — keys.env file (recommended for repeated use):**
+
 ```bash
-export LLM_BACKEND=anthropic    # default
-export ANTHROPIC_API_KEY=sk-ant-...
-# export LLM_MODEL=claude-sonnet-4-5    # optional override
+# Easiest: use the helper. It prompts silently and writes ~/.config/swe-team/keys.env
+# with mode 0600. The key never lands in your shell history.
+scripts/set-key.sh GEMINI_API_KEY          # or ANTHROPIC_API_KEY
+
+# Or write the file yourself:
+mkdir -p ~/.config/swe-team
+chmod 700 ~/.config/swe-team
+cat > ~/.config/swe-team/keys.env <<'EOF'
+LLM_BACKEND=gemini
+GEMINI_API_KEY=AIzaSy...
+EOF
+chmod 600 ~/.config/swe-team/keys.env
 ```
 
-**Google Gemini (free tier at aistudio.google.com):**
+Search order (first hit wins):
+1. `$SWE_TEAM_KEYS` (custom path)
+2. `./keys.env` (current dir — useful in dev)
+3. `./binary/driver/keys.env` (colocated)
+4. `~/.config/swe-team/keys.env` (canonical)
+5. `~/.swe-team/keys.env` (fallback)
+
+All five locations are gitignored. The file format is plain `KEY=value`
+with `#` comments, no quote-escaping (paste the key as-is).
+
+**Option B — shell env vars (one-off):**
+
 ```bash
-export LLM_BACKEND=gemini
-export GEMINI_API_KEY=...        # or GOOGLE_API_KEY
-# export LLM_MODEL=gemini-2.5-flash    # optional override
+export LLM_BACKEND=anthropic                         # or gemini
+export ANTHROPIC_API_KEY=sk-ant-...                  # or GEMINI_API_KEY
+# export LLM_MODEL=claude-sonnet-4-5                 # optional override
 ```
 
 Then:
