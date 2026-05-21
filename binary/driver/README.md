@@ -32,9 +32,17 @@ can validate the protocol end-to-end without an API key.
 
 ## Run live (real agents)
 
-The driver speaks to two LLM backends — pick with `LLM_BACKEND`. Each
-construction is lazy, so you only need the matching SDK and API key for the
-backend you select.
+The driver speaks to three LLM backends — pick globally with `LLM_BACKEND`
+or per-role with `LLM_BACKEND_<ROLE>`:
+
+| Backend | API | Cost / availability |
+| --- | --- | --- |
+| `anthropic` | Anthropic Messages API | Paid; requires credit balance |
+| `gemini` | Google Gemini | Free tier (rate-limited, 5–15 RPM) |
+| `local` | OpenAI-compat (Ollama, LM Studio, vLLM…) | Free, offline |
+
+Each construction is lazy, so you only need the SDK + key for the backend(s)
+you actually use.
 
 ### Where the key lives
 
@@ -72,9 +80,38 @@ with `#` comments, no quote-escaping (paste the key as-is).
 **Option B — shell env vars (one-off):**
 
 ```bash
-export LLM_BACKEND=anthropic                         # or gemini
+export LLM_BACKEND=anthropic                         # or gemini, or local
 export ANTHROPIC_API_KEY=sk-ant-...                  # or GEMINI_API_KEY
 # export LLM_MODEL=claude-sonnet-4-5                 # optional override
+```
+
+### Hybrid: different backend per role
+
+Cheap, well-defined steps go to local; nuanced, strategic steps to cloud.
+Set `LLM_BACKEND_<ROLE>` per agent — it wins over the global default.
+Role slugs translate `-` to `_`, so `coder-python` becomes
+`LLM_BACKEND_CODER_PYTHON`. `LLM_MODEL_<ROLE>` works the same way.
+
+Example `keys.env` for "everything local except architect and QA":
+
+```
+LLM_BACKEND=local
+LLM_BACKEND_ARCHITECT=anthropic
+LLM_BACKEND_QA=anthropic
+
+ANTHROPIC_API_KEY=sk-ant-...
+LOCAL_MODEL=qwen2.5:7b
+LLM_MODEL_ARCHITECT=claude-sonnet-4-5
+```
+
+### Setting up Ollama for the `local` backend
+
+```bash
+# 1. Install Ollama from ollama.com
+# 2. Pull a tool-capable model:
+ollama pull qwen2.5:7b
+# (or llama3.1:8b, mistral-small, etc. — `ollama show <model>` must list `tools`)
+# 3. Ollama runs at http://localhost:11434/v1 by default — no extra config.
 ```
 
 Then:

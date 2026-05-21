@@ -80,7 +80,9 @@ DEFAULT_BACKEND = "anthropic"
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-5",
     "gemini":    "gemini-2.5-flash",
+    "local":     "qwen2.5:7b",
 }
+DEFAULT_LOCAL_BASE_URL = "http://localhost:11434/v1"
 VALID_NEXT_ROLES = {
     "pm", "architect", "qa",
     "coder-cpp", "coder-backend", "coder-frontend", "coder-python",
@@ -652,13 +654,140 @@ class GeminiBackend(Backend):
         return messages
 
 
+class LocalBackend(Backend):
+    """OpenAI-compatible HTTP backend. Default base URL targets Ollama on
+    localhost; works with any OpenAI-compat server (LM Studio, llama.cpp's
+    `llama-server`, vLLM, etc.) by overriding LOCAL_BASE_URL.
+
+    Model needs to support tool/function calling. As of 2026 that's
+    llama3.1+, qwen2.5+, mistral-small/large, and a few others — check
+    `ollama show <model> --modelfile` for the `tools` capability.
+    """
+
+    name = "local"
+
+    def __init__(self) -> None:
+        try:
+            from openai import OpenAI
+        except ImportError:
+            fatal("openai package not installed. Install with: pip install openai")
+        base_url = os.environ.get("LOCAL_BASE_URL", DEFAULT_LOCAL_BASE_URL)
+        # Some local servers ignore the key; Ollama tolerates anything. The
+        # SDK requires a non-empty string though, so we send a placeholder
+        # unless the user supplied a real one (some auth proxies want one).
+        api_key = os.environ.get("LOCAL_API_KEY", "ollama")
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.base_url = base_url
+
+    def initial_messages(self, user_text: str) -> list[dict]:
+        return [{"role": "user", "content": user_text}]
+
+    def _to_openai_tools(self, tools: list[dict]) -> list[dict]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"],
+                },
+            }
+            for t in tools
+        ]
+
+    def call(self, system: str, messages: list[dict], tools: list[dict], model: str) -> TurnResult:
+        # OpenAI puts the system prompt as the first message, not a separate
+        # field. Prepend it on each call (cheap; doesn't mutate messages).
+        full_messages = [{"role": "system", "content": system}] + messages
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": full_messages,
+        }
+        if tools:
+            kwargs["tools"] = self._to_openai_tools(tools)
+            kwargs["tool_choice"] = "auto"
+
+        response = self.client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        msg = choice.message
+
+        text = msg.content or ""
+        tool_uses: list[ToolUseRequest] = []
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except json.JSONDecodeError:
+                    args = {}
+                tool_uses.append(ToolUseRequest(
+                    id=tc.id, name=tc.function.name, args=args,
+                ))
+        stop = "tool_use" if tool_uses else "end_turn"
+
+        # Stash the assistant message dict so we can replay it next turn.
+        # We don't use the raw object directly because some servers omit
+        # fields the SDK expects.
+        raw = {"role": "assistant", "content": text or None}
+        if tool_uses:
+            raw["tool_calls"] = [
+                {
+                    "id": u.id,
+                    "type": "function",
+                    "function": {"name": u.name, "arguments": json.dumps(u.args)},
+                }
+                for u in tool_uses
+            ]
+        return TurnResult(text=text, tool_uses=tool_uses, stop_reason=stop, raw_assistant=raw)
+
+    def append_assistant(self, messages: list[dict], turn: TurnResult) -> list[dict]:
+        messages.append(turn.raw_assistant)
+        return messages
+
+    def append_tool_results(self, messages: list[dict], results: list[tuple[str, str, str]]) -> list[dict]:
+        # OpenAI wants one `tool` message per tool_call_id (not a batch).
+        for tid, _name, text in results:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tid,
+                "content": text,
+            })
+        return messages
+
+
 def make_backend(name: str | None = None) -> Backend:
     name = (name or os.environ.get("LLM_BACKEND") or DEFAULT_BACKEND).lower().strip()
     if name == "anthropic":
         return AnthropicBackend()
     if name == "gemini":
         return GeminiBackend()
-    fatal(f"unknown LLM_BACKEND={name!r}; valid: anthropic, gemini")
+    if name == "local":
+        return LocalBackend()
+    fatal(f"unknown LLM_BACKEND={name!r}; valid: anthropic, gemini, local")
+
+
+def _env_role_key(prefix: str, role: str) -> str:
+    """Translate a role slug into the env-var suffix convention.
+
+    `coder-python` → `CODER_PYTHON`, so callers can set
+    `LLM_BACKEND_CODER_PYTHON=local` etc.
+    """
+    return f"{prefix}_{role.upper().replace('-', '_')}"
+
+
+def backend_name_for_role(role: str) -> str:
+    """Pick the backend for a specific role. Per-role env wins over global."""
+    per_role = os.environ.get(_env_role_key("LLM_BACKEND", role))
+    if per_role:
+        return per_role.lower().strip()
+    return (os.environ.get("LLM_BACKEND") or DEFAULT_BACKEND).lower().strip()
+
+
+def model_for_role(role: str, backend_name: str) -> str:
+    """Pick the model for a specific role. Per-role env wins over global."""
+    per_role = os.environ.get(_env_role_key("LLM_MODEL", role))
+    if per_role:
+        return per_role
+    return os.environ.get("LLM_MODEL") or DEFAULT_MODELS.get(backend_name, "")
 
 
 # ---------- provider-agnostic agent loop ----------
@@ -801,19 +930,16 @@ def run_team(request: dict[str, Any]) -> None:
     # Test-only: in dry-run, force the named role to ask one user question.
     dry_run_ask_role = request.get("_dry_run_ask_role")
 
-    # Backend selection: env var picks anthropic | gemini. Default anthropic.
-    # The model can be overridden via LLM_MODEL or the per-backend defaults.
-    backend_name = os.environ.get("LLM_BACKEND", DEFAULT_BACKEND).lower().strip()
-    model = (
-        os.environ.get("LLM_MODEL")
-        or os.environ.get("ANTHROPIC_MODEL")  # legacy
-        or DEFAULT_MODELS.get(backend_name, DEFAULT_MODELS["anthropic"])
-    )
-    # Construct backend lazily so dry-run mode doesn't require any API key.
-    backend: Backend | None = None
-    if not dry_run:
-        backend = make_backend(backend_name)
-        log("info", f"using backend={backend_name} model={model}")
+    # Backend selection is now per-role: each agent can run on a different
+    # backend via LLM_BACKEND_<ROLE>. Global LLM_BACKEND is the fallback.
+    # Backends are constructed lazily and cached so a hybrid run that uses
+    # the same backend for several roles doesn't re-init the client.
+    backend_cache: dict[str, Backend] = {}
+
+    def get_backend(name: str) -> Backend:
+        if name not in backend_cache:
+            backend_cache[name] = make_backend(name)
+        return backend_cache[name]
 
     # Validate SWE root has what we need.
     for required in ("team-brief.md", "orchestrator.md", "agents"):
@@ -861,7 +987,10 @@ def run_team(request: dict[str, Any]) -> None:
             if dry_run:
                 result = run_agent_stub(next_role, note, project_root, ask_role=dry_run_ask_role)
             else:
-                assert backend is not None  # set above when not dry_run
+                role_backend_name = backend_name_for_role(next_role)
+                role_model = model_for_role(next_role, role_backend_name)
+                role_backend = get_backend(role_backend_name)
+                log("info", f"{next_role}: backend={role_backend_name} model={role_model}")
                 result = run_agent_live(
                     role=next_role,
                     role_text=role_text,
@@ -869,8 +998,8 @@ def run_team(request: dict[str, Any]) -> None:
                     project_root=project_root,
                     note=note,
                     idea=idea,
-                    backend=backend,
-                    model=model,
+                    backend=role_backend,
+                    model=role_model,
                 )
         except Exception as e:  # noqa: BLE001
             emit("error", message=f"{type(e).__name__}: {e}", traceback=traceback.format_exc())
